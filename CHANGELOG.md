@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.1 — 2026-09-07
+
+- Launch the menu bar app in the background so the terminal returns immediately
+- Show one independent menu-bar item per signed-in provider
+- Simplify every provider menu to sponsor, usage, and refresh controls
+
 ## v2.0.0 — 2026-09-07
 
 - Added Codex usage from the signed-in ChatGPT account alongside Claude Code

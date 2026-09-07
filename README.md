@@ -9,7 +9,7 @@ See how close each signed-in account is to its session and weekly limits, and wh
 
 ## What it looks like
 
-The menu bar shows compact ring gauges with the percentage inside each ring and a countdown to the active limit reset. Claude uses green and purple rings; Codex uses blue and teal. Warning states stay consistent across providers: orange at 80% and red with `!` at 100%.
+Each signed-in provider gets its own menu-bar item with compact ring gauges and a countdown to its active limit reset. Claude uses green and purple rings; Codex uses blue and teal. A provider that is not signed in is not shown. Warning states stay consistent across providers: orange at 80% and red with `!` at 100%.
 
 <img src="docs/menubar.png" width="256" alt="Menu bar ring gauges with percentages and a reset countdown">
 
@@ -18,7 +18,7 @@ Click the gauges for the full picture. Each signed-in provider gets the same nat
 <img src="docs/dropdown.png" width="264" alt="Dropdown with usage donut and limit reset rows">
 
 - Data for Claude and Codex refreshes independently every minute, so one unavailable provider does not hide the other.
-- Header buttons open Claude usage, Codex usage, support the developer, or refresh immediately. The gauges spin while fetching.
+- Every provider dropdown has three header buttons: sponsor, provider usage, and refresh. The gauges spin while fetching.
 - The last successful response for each provider is cached in `~/Library/Caches/usage-limits-bar/` and shown immediately after a restart.
 - The app checks once a day for a newer version and adds an **Update available** menu item when one exists.
 
@@ -37,7 +37,7 @@ Requires macOS 11+ and Python 3.9+. Pick whichever tool you already use:
 Then:
 
 ```sh
-usage-limits-bar                # run the menu bar app
+usage-limits-bar                # launch the menu bar app and return immediately
 usage-limits-bar autostart on   # start automatically at login
 usage-limits-bar autostart off  # remove the login item
 usage-limits-bar status         # print all available limits

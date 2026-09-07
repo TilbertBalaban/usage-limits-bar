@@ -1,4 +1,5 @@
 import argparse
+import os
 import plistlib
 import subprocess
 import sys
@@ -17,6 +18,17 @@ from .limits import (
 )
 
 LAUNCH_AGENT = Path.home() / "Library" / "LaunchAgents" / "com.usage-limits-bar.plist"
+
+
+def launch_menubar() -> int:
+    subprocess.Popen(
+        [sys.executable, "-m", "usage_limits_bar.cli", "--foreground"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return 0
 
 
 def cmd_status() -> int:
@@ -56,7 +68,7 @@ def cmd_autostart(state: str) -> int:
     executable = Path(sys.argv[0]).resolve()
     plist = {
         "Label": "com.usage-limits-bar",
-        "ProgramArguments": [str(executable)],
+        "ProgramArguments": [str(executable), "--foreground"],
         "RunAtLoad": True,
     }
     LAUNCH_AGENT.parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +85,7 @@ def main() -> int:
         description="Claude and Codex limits and reset times in the macOS menu bar.",
     )
     parser.add_argument("--version", action="version", version=VERSION)
+    parser.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("status", help="print current limits to the terminal")
     autostart = sub.add_parser("autostart", help="start automatically at login")
@@ -85,7 +98,10 @@ def main() -> int:
         return cmd_autostart(args.state)
 
     from .menubar import main as run_menubar
-    run_menubar()
+    if args.foreground or os.environ.get("USAGE_LIMITS_BAR_FOREGROUND"):
+        run_menubar()
+    else:
+        return launch_menubar()
     return 0
 
 

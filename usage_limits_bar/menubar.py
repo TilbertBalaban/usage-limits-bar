@@ -70,8 +70,12 @@ MENU_WIDTH = 264
 RATE_LIMIT_ERROR = "Usage API rate-limited — showing last known data"
 RATE_LIMIT_NO_DATA_ERROR = "Usage API rate-limited — retrying in a minute"
 DONATE_URL = "https://base.monobank.ua/tilbertbalaban"
-CLAUDE_USAGE_PAGE = "https://claude.ai/settings/usage"
-CODEX_USAGE_PAGE = "https://chatgpt.com/codex/settings/usage"
+USAGE_PAGES = {
+    CLAUDE: "https://claude.ai/settings/usage",
+    CODEX: "https://chatgpt.com/codex/settings/usage",
+}
+PROVIDER_TAGS = {CLAUDE: 1, CODEX: 2}
+TAG_PROVIDERS = {tag: provider for provider, tag in PROVIDER_TAGS.items()}
 
 GREEN = NSColor.systemGreenColor()
 PURPLE = NSColor.systemPurpleColor()
@@ -201,7 +205,7 @@ def _symbol_button(symbol, fallback, tooltip, target, action):
 
 
 class HeaderView(NSView):
-    """App title with the stats, donate ($) and refresh icon buttons.
+    """Provider title with sponsor, usage, and refresh buttons.
 
     Hovering a button shows its hint in place of the title. The hint clears
     on a short delay so moving between adjacent buttons swaps hints without
@@ -210,21 +214,22 @@ class HeaderView(NSView):
 
     BUTTONS = [
         ("dollarsign.circle", "$", "Support the developer", "donate:"),
-        ("chart.bar.xaxis", "C", "Open Claude usage", "openClaudeUsage:"),
-        ("chart.bar.fill", "X", "Open Codex usage", "openCodexUsage:"),
+        ("chart.bar.xaxis", "📊", "Open usage", "openUsage:"),
         ("arrow.clockwise", "↻", "Refresh", "refresh:"),
     ]
     CLEAR_DELAY = 0.25
 
-    def initWithTarget_(self, target):
+    def initWithTarget_provider_(self, target, provider):
         self = objc.super(HeaderView, self).initWithFrame_(
             NSMakeRect(0, 0, MENU_WIDTH, 38))
         if self is None:
             return None
+        self._provider = provider
         self._hint = None
         x = MENU_WIDTH - 30 * len(self.BUTTONS) - 10
         for symbol, fallback, hint, action in self.BUTTONS:
             button = _symbol_button(symbol, fallback, hint, target, action)
+            button.setTag_(PROVIDER_TAGS[provider])
             frame = NSMakeRect(x, 7, 26, 24)
             button.setFrame_(frame)
             self.addSubview_(button)
@@ -268,7 +273,8 @@ class HeaderView(NSView):
                       text_attrs(12, NSColor.secondaryLabelColor(),
                                  align=NSTextAlignmentLeft))
         else:
-            draw_text("Usage Limits", NSMakeRect(16, 3, MENU_WIDTH - 140, 32),
+            draw_text(PROVIDER_NAMES[self._provider] + " Usage",
+                      NSMakeRect(16, 3, MENU_WIDTH - 110, 32),
                       text_attrs(14, NSColor.labelColor(), bold=True,
                                  align=NSTextAlignmentLeft))
 
@@ -385,12 +391,10 @@ class StatusApp(NSObject):
         self._fetch_started = 0.0
         self._spin = 0
         self._spin_timer = None
-        self._animated_views = []
-        self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
-            NSVariableStatusItemLength)
-        self.status_item.button().setImagePosition_(2)  # NSImageLeft
-        self.menu = NSMenu.alloc().init()
-        self.status_item.setMenu_(self.menu)
+        self._animated_views = {provider: [] for provider in PROVIDERS}
+        self._status_items = {}
+        self._menus = {}
+        self._menu_states = {}
         self._render()
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             REFRESH_SECONDS, self, "tick:", None, True)
@@ -430,8 +434,9 @@ class StatusApp(NSObject):
         if settled:
             self._spin_timer.invalidate()
             self._spin_timer = None
-        for view in self._animated_views:
-            view.set_spin(self._spin)
+        for views in self._animated_views.values():
+            for view in views:
+                view.set_spin(self._spin)
 
     @objc.python_method
     def _fetch(self, providers):
@@ -483,98 +488,109 @@ class StatusApp(NSObject):
 
     @objc.python_method
     def _render(self):
-        button = self.status_item.button()
-        bar_limits = [
-            limit for limit in self._limits
-            if limit.kind in ("session", "weekly_all")
-        ] or self._limits[:2]
-        primary = primary_limit(self._limits)
-        if bar_limits:
+        provider_limits = {
+            provider: [limit for limit in self._limits if limit.provider == provider]
+            for provider in PROVIDERS
+        }
+        active_providers = {
+            provider for provider, limits in provider_limits.items() if limits
+        }
+        for provider in set(self._status_items) - active_providers:
+            NSStatusBar.systemStatusBar().removeStatusItem_(
+                self._status_items.pop(provider))
+            self._menus.pop(provider, None)
+            self._menu_states.pop(provider, None)
+            self._animated_views[provider] = []
+        for provider in PROVIDERS:
+            if provider not in active_providers:
+                continue
+            limits = provider_limits[provider]
+            item = self._status_items.get(provider)
+            if item is None:
+                item = NSStatusBar.systemStatusBar().statusItemWithLength_(
+                    NSVariableStatusItemLength)
+                item.button().setImagePosition_(2)
+                self._status_items[provider] = item
+                self._menus[provider] = NSMenu.alloc().init()
+                item.setMenu_(self._menus[provider])
+            button = item.button()
+            bar_limits = [
+                limit for limit in limits
+                if limit.kind in ("session", "weekly_all")
+            ] or limits[:2]
+            primary = primary_limit(limits)
             dark = "dark" in str(button.effectiveAppearance().name()).lower()
             button.setImage_(status_bar_image(bar_limits, dark))
             button.setTitle_(" " + time_until(primary.resets_at) if primary else "")
-        else:
-            button.setImage_(None)
-            button.setTitle_("…" if not self._errors else "?")
-        # Rebuilding replaces the menu's views, which cancels hover/tooltips
-        # if the menu is open — skip it when nothing visible changed.
-        state = (tuple((limit.provider, limit.label, round(limit.percent),
-                        limit.resets_at, limit.severity)
-                       for limit in self._limits),
-                 tuple(sorted(self._errors.items())), self._update)
-        if state != getattr(self, "_menu_state", None):
-            self._menu_state = state
-            self._rebuild_menu()
+            state = (
+                tuple((limit.label, round(limit.percent), limit.resets_at, limit.severity)
+                      for limit in limits),
+                self._errors.get(provider),
+                self._update,
+            )
+            if state != self._menu_states.get(provider):
+                self._menu_states[provider] = state
+                self._rebuild_menu(provider, limits)
 
     @objc.python_method
-    def _rebuild_menu(self):
-        self.menu.removeAllItems()
-        self._animated_views = []
-        header = HeaderView.alloc().initWithTarget_(self)
+    def _rebuild_menu(self, provider, limits):
+        menu = self._menus[provider]
+        menu.removeAllItems()
+        self._animated_views[provider] = []
+        header = HeaderView.alloc().initWithTarget_provider_(self, provider)
         header_item = NSMenuItem.alloc().init()
         header_item.setView_(header)
-        self.menu.addItem_(header_item)
-        self._animated_views.append(header)
-        rendered_provider = False
-        for provider in PROVIDERS:
-            provider_limits = [
-                limit for limit in self._limits if limit.provider == provider
-            ]
-            if rendered_provider and (provider_limits or provider in self._errors):
-                self.menu.addItem_(NSMenuItem.separatorItem())
-            if provider_limits:
-                donut = DonutView.alloc().initWithProvider_limits_(
-                    provider, provider_limits)
-                donut_item = NSMenuItem.alloc().init()
-                donut_item.setView_(donut)
-                self.menu.addItem_(donut_item)
-                self._animated_views.append(donut)
-                for limit in provider_limits:
-                    row_view = LimitRowView.alloc().initWithLimit_(limit)
-                    row = NSMenuItem.alloc().init()
-                    row.setView_(row_view)
-                    self.menu.addItem_(row)
-                    self._animated_views.append(row_view)
-            if provider in self._errors:
-                err = NSMenuItem.alloc().init()
-                err.setView_(ErrorRowView.alloc().initWithMessage_(
-                    self._errors[provider]))
-                self.menu.addItem_(err)
-            rendered_provider = rendered_provider or bool(
-                provider_limits or provider in self._errors)
-        for view in self._animated_views:
+        menu.addItem_(header_item)
+        self._animated_views[provider].append(header)
+        donut = DonutView.alloc().initWithProvider_limits_(provider, limits)
+        donut_item = NSMenuItem.alloc().init()
+        donut_item.setView_(donut)
+        menu.addItem_(donut_item)
+        self._animated_views[provider].append(donut)
+        for limit in limits:
+            row_view = LimitRowView.alloc().initWithLimit_(limit)
+            row = NSMenuItem.alloc().init()
+            row.setView_(row_view)
+            menu.addItem_(row)
+            self._animated_views[provider].append(row_view)
+        if provider in self._errors:
+            err = NSMenuItem.alloc().init()
+            err.setView_(ErrorRowView.alloc().initWithMessage_(
+                self._errors[provider]))
+            menu.addItem_(err)
+        for view in self._animated_views[provider]:
             view.set_spin(self._spin)
         if self._update:
-            self.menu.addItem_(NSMenuItem.separatorItem())
-            self._add_action("Update available — v" + self._update, "openReleases:")
-        self.menu.addItem_(NSMenuItem.separatorItem())
-        self._add_action("Quit", "quit:")
+            menu.addItem_(NSMenuItem.separatorItem())
+            self._add_action(menu, "Update available — v" + self._update, "openReleases:")
+        menu.addItem_(NSMenuItem.separatorItem())
+        self._add_action(menu, "Quit", "quit:")
 
     @objc.python_method
-    def _add_action(self, title, selector):
+    def _add_action(self, menu, title, selector):
         item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             title, selector, "")
         item.setTarget_(self)
-        self.menu.addItem_(item)
+        menu.addItem_(item)
 
     def refresh_(self, _sender):
         self._skip_ticks = {provider: 0 for provider in PROVIDERS}
         self.tick_(None)
 
-    def openClaudeUsage_(self, _sender):
-        self.menu.cancelTracking()
-        webbrowser.open(CLAUDE_USAGE_PAGE)
+    def openUsage_(self, sender):
+        provider = TAG_PROVIDERS.get(sender.tag())
+        if provider is None:
+            return
+        self._menus[provider].cancelTracking()
+        webbrowser.open(USAGE_PAGES[provider])
 
-    def openCodexUsage_(self, _sender):
-        self.menu.cancelTracking()
-        webbrowser.open(CODEX_USAGE_PAGE)
-
-    def donate_(self, _sender):
-        self.menu.cancelTracking()
+    def donate_(self, sender):
+        provider = TAG_PROVIDERS.get(sender.tag())
+        if provider is not None:
+            self._menus[provider].cancelTracking()
         webbrowser.open(DONATE_URL)
 
     def openReleases_(self, _sender):
-        self.menu.cancelTracking()
         webbrowser.open(RELEASES_URL)
 
     def quit_(self, _sender):
