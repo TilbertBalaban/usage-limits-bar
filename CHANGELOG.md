@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.0 — 2026-09-07
+
+- Added Codex usage from the signed-in ChatGPT account alongside Claude Code
+- Added blue and teal Codex rings while preserving the native donut and limit-row layout
+- Fetches, errors, and caches are isolated per provider so partial outages degrade gracefully
+- Renamed the package, command, cache, LaunchAgent, and repository references to `usage-limits-bar`
+
 ## v1.4.1 — 2026-09-04
 
 - Reset times always show minutes ("1:00 AM" instead of "1 AM")
@@ -7,7 +14,7 @@
 ## v1.4.0 — 2026-09-04
 
 - Header buttons reordered: support ($), stats, refresh
-- The last successful usage response is cached on disk (~/Library/Caches/claude-limits-bar), so a restart shows data immediately instead of "✳ ?"
+- The last successful usage response is cached on disk, so a restart shows data immediately instead of an unknown state
 - When there is no data yet and the usage API returns 429, the app retries every minute instead of backing off for five
 
 ## v1.3.3 — 2026-09-04
@@ -41,7 +48,7 @@
 
 ## v1.2.0 — 2026-09-04
 
-- Renamed to claude-limits-bar (package, command, repo); the menu header now reads "Claude Limits"
+- Renamed the package, command, and repository; the menu header was updated to match
 
 ## v1.1.1 — 2026-09-04
 

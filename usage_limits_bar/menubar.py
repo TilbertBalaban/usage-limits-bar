@@ -1,35 +1,64 @@
-"""macOS menu bar app: ring gauges for Claude limits, reset times in the menu.
-
-Menu bar shows two mini rings (session + weekly, percent inside) plus the
-time until the 5-hour limit resets. The dropdown shows a large session donut
-with the weekly limit as a thin outer arc, and one row per limit.
-"""
+"""macOS menu bar app for Claude and Codex usage limits."""
 
 import math
 import threading
 import time
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 
 import objc
 from AppKit import (
-    NSApplication, NSApplicationActivationPolicyAccessory,
-    NSAttributedString, NSBezierPath, NSButton, NSColor, NSFont,
-    NSFontAttributeName, NSForegroundColorAttributeName, NSImage, NSMakeRect,
-    NSMenu, NSMenuItem, NSMutableParagraphStyle, NSParagraphStyleAttributeName,
-    NSEventTrackingRunLoopMode, NSStatusBar, NSTextAlignmentCenter,
-    NSTextAlignmentLeft, NSTextAlignmentRight, NSTrackingActiveAlways,
-    NSTrackingArea, NSTrackingMouseEnteredAndExited,
-    NSVariableStatusItemLength, NSView,
+    NSApplication,
+    NSApplicationActivationPolicyAccessory,
+    NSAttributedString,
+    NSBezierPath,
+    NSButton,
+    NSColor,
+    NSEventTrackingRunLoopMode,
+    NSFont,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
+    NSImage,
+    NSMakeRect,
+    NSMenu,
+    NSMenuItem,
+    NSMutableParagraphStyle,
+    NSParagraphStyleAttributeName,
+    NSStatusBar,
+    NSTextAlignmentCenter,
+    NSTextAlignmentLeft,
+    NSTextAlignmentRight,
+    NSTrackingActiveAlways,
+    NSTrackingArea,
+    NSTrackingMouseEnteredAndExited,
+    NSVariableStatusItemLength,
+    NSView,
 )
 from Foundation import (
-    NSDefaultRunLoopMode, NSObject, NSRunLoop, NSRunLoopCommonModes, NSTimer,
+    NSDefaultRunLoopMode,
+    NSObject,
+    NSRunLoop,
+    NSRunLoopCommonModes,
+    NSTimer,
 )
 from PyObjCTools import AppHelper
 
 from .limits import (
-    CredentialsNotFound, TokenRejected, UsageRateLimited,
-    fetch_usage, get_access_token, load_cache, parse_limits, reset_label,
-    save_cache, time_until,
+    CLAUDE,
+    CODEX,
+    PROVIDER_NAMES,
+    PROVIDERS,
+    CredentialsNotFound,
+    TokenRejected,
+    UsageRateLimited,
+    fetch_usage,
+    get_credentials,
+    load_cache,
+    parse_limits,
+    primary_limit,
+    reset_label,
+    save_cache,
+    time_until,
 )
 from .update import CHECK_INTERVAL_SECONDS, RELEASES_URL, available_update
 
@@ -41,10 +70,13 @@ MENU_WIDTH = 264
 RATE_LIMIT_ERROR = "Usage API rate-limited — showing last known data"
 RATE_LIMIT_NO_DATA_ERROR = "Usage API rate-limited — retrying in a minute"
 DONATE_URL = "https://base.monobank.ua/tilbertbalaban"
-USAGE_URL = "https://claude.ai/settings/usage"
+CLAUDE_USAGE_PAGE = "https://claude.ai/settings/usage"
+CODEX_USAGE_PAGE = "https://chatgpt.com/codex/settings/usage"
 
 GREEN = NSColor.systemGreenColor()
 PURPLE = NSColor.systemPurpleColor()
+BLUE = NSColor.systemBlueColor()
+TEAL = NSColor.systemTealColor()
 ORANGE = NSColor.systemOrangeColor()
 RED = NSColor.systemRedColor()
 
@@ -54,7 +86,12 @@ def ring_color(limit):
         return RED
     if limit.warning:
         return ORANGE
-    return GREEN if limit.kind == "session" else PURPLE
+    colors = {
+        CLAUDE: (GREEN, PURPLE),
+        CODEX: (BLUE, TEAL),
+    }
+    primary, secondary = colors.get(limit.provider, (GREEN, PURPLE))
+    return primary if limit.kind == "session" else secondary
 
 
 def draw_ring(center, radius, line_width, percent, color, track_color, spin=0):
@@ -173,7 +210,8 @@ class HeaderView(NSView):
 
     BUTTONS = [
         ("dollarsign.circle", "$", "Support the developer", "donate:"),
-        ("chart.bar.xaxis", "📊", "Open claude.ai stats", "openUsage:"),
+        ("chart.bar.xaxis", "C", "Open Claude usage", "openClaudeUsage:"),
+        ("chart.bar.fill", "X", "Open Codex usage", "openCodexUsage:"),
         ("arrow.clockwise", "↻", "Refresh", "refresh:"),
     ]
     CLEAR_DELAY = 0.25
@@ -230,7 +268,7 @@ class HeaderView(NSView):
                       text_attrs(12, NSColor.secondaryLabelColor(),
                                  align=NSTextAlignmentLeft))
         else:
-            draw_text("✳ Claude Limits", NSMakeRect(16, 3, MENU_WIDTH - 110, 32),
+            draw_text("Usage Limits", NSMakeRect(16, 3, MENU_WIDTH - 140, 32),
                       text_attrs(14, NSColor.labelColor(), bold=True,
                                  align=NSTextAlignmentLeft))
 
@@ -238,11 +276,12 @@ class HeaderView(NSView):
 class DonutView(NSView):
     """Large session donut with the weekly limit as a thin outer arc."""
 
-    def initWithLimits_(self, limits):
+    def initWithProvider_limits_(self, provider, limits):
         self = objc.super(DonutView, self).initWithFrame_(
             NSMakeRect(0, 0, MENU_WIDTH, 170))
         if self is None:
             return None
+        self._provider = provider
         self._limits = limits
         self._spin = 0
         return self
@@ -253,8 +292,10 @@ class DonutView(NSView):
         self.setNeedsDisplay_(True)
 
     def drawRect_(self, rect):
-        session = next((l for l in self._limits if l.kind == "session"), None)
-        weekly = next((l for l in self._limits if l.kind == "weekly_all"), None)
+        session = next(
+            (limit for limit in self._limits if limit.kind == "session"), None)
+        weekly = next(
+            (limit for limit in self._limits if limit.kind == "weekly_all"), None)
         primary = session or (self._limits[0] if self._limits else None)
         if primary is None:
             return
@@ -268,7 +309,8 @@ class DonutView(NSView):
         draw_text("%d%%" % round(primary.percent),
                   NSMakeRect(0, 78, MENU_WIDTH, 40),
                   text_attrs(28, NSColor.labelColor(), bold=True))
-        draw_text("Used", NSMakeRect(0, 54, MENU_WIDTH, 20),
+        draw_text(PROVIDER_NAMES[self._provider] + " · Used",
+                  NSMakeRect(0, 54, MENU_WIDTH, 20),
                   text_attrs(12, NSColor.secondaryLabelColor()))
 
 
@@ -330,10 +372,13 @@ class ErrorRowView(NSView):
 
 class StatusApp(NSObject):
     def applicationDidFinishLaunching_(self, _notification):
-        cached = load_cache()
-        self._limits = parse_limits(cached) if cached else []
-        self._error = None
-        self._skip_ticks = 0
+        self._limits = []
+        for provider in PROVIDERS:
+            cached = load_cache(provider)
+            if cached:
+                self._limits.extend(parse_limits(provider, cached))
+        self._errors = {}
+        self._skip_ticks = {provider: 0 for provider in PROVIDERS}
         self._update = None
         self._last_update_check = 0.0
         self._fetching = False
@@ -352,13 +397,18 @@ class StatusApp(NSObject):
         self.tick_(None)
 
     def tick_(self, _timer):
-        if self._skip_ticks > 0:
-            self._skip_ticks -= 1
+        providers = []
+        for provider in PROVIDERS:
+            if self._skip_ticks[provider] > 0:
+                self._skip_ticks[provider] -= 1
+            else:
+                providers.append(provider)
+        if not providers:
             return
         self._fetching = True
         self._fetch_started = time.time()
         self._start_spin()
-        threading.Thread(target=self._fetch, daemon=True).start()
+        threading.Thread(target=self._fetch, args=(providers,), daemon=True).start()
 
     @objc.python_method
     def _start_spin(self):
@@ -384,53 +434,74 @@ class StatusApp(NSObject):
             view.set_spin(self._spin)
 
     @objc.python_method
-    def _fetch(self):
+    def _fetch(self, providers):
         if time.time() - self._last_update_check > CHECK_INTERVAL_SECONDS:
             self._last_update_check = time.time()
             self._update = available_update()
-        limits, error = None, None
-        try:
-            data = fetch_usage(get_access_token())
-            limits = parse_limits(data)
-            save_cache(data)
-        except CredentialsNotFound:
-            error = "No Claude Code credentials — run `claude` and sign in"
-        except TokenRejected:
-            error = "Token expired — use Claude Code once to refresh it"
-        except UsageRateLimited:
-            error = RATE_LIMIT_ERROR if self._limits else RATE_LIMIT_NO_DATA_ERROR
-        except Exception:
-            error = "Could not reach api.anthropic.com"
-        AppHelper.callAfter(self._apply, limits, error)
+        with ThreadPoolExecutor(max_workers=len(providers)) as pool:
+            results = dict(zip(providers, pool.map(self._fetch_provider, providers)))
+        AppHelper.callAfter(self._apply, results)
 
     @objc.python_method
-    def _apply(self, limits, error):
-        if limits is not None:
-            self._limits = limits
-        self._error = error
+    def _fetch_provider(self, provider):
+        try:
+            data = fetch_usage(provider, get_credentials(provider))
+            save_cache(provider, data)
+            return parse_limits(provider, data), None
+        except CredentialsNotFound:
+            command = "claude" if provider == CLAUDE else "codex login"
+            return None, "No %s credentials — run `%s` and sign in" % (
+                PROVIDER_NAMES[provider], command)
+        except TokenRejected:
+            command = "Claude Code" if provider == CLAUDE else "`codex login`"
+            return None, "%s token expired — sign in with %s again" % (
+                PROVIDER_NAMES[provider], command)
+        except UsageRateLimited:
+            has_data = any(limit.provider == provider for limit in self._limits)
+            error = RATE_LIMIT_ERROR if has_data else RATE_LIMIT_NO_DATA_ERROR
+            return None, PROVIDER_NAMES[provider] + ": " + error
+        except Exception:
+            host = "api.anthropic.com" if provider == CLAUDE else "chatgpt.com"
+            return None, "Could not reach " + host
+
+    @objc.python_method
+    def _apply(self, results):
+        for provider, (limits, error) in results.items():
+            if limits is not None:
+                self._limits = [
+                    limit for limit in self._limits if limit.provider != provider
+                ] + limits
+            if error:
+                self._errors[provider] = error
+            else:
+                self._errors.pop(provider, None)
+            self._skip_ticks[provider] = 4 if (
+                error and RATE_LIMIT_ERROR in error
+            ) else 0
         self._fetching = False
-        # The usage endpoint has its own rate limit; poll gently after a 429.
-        self._skip_ticks = 4 if error == RATE_LIMIT_ERROR else 0
         self._render()
 
     @objc.python_method
     def _render(self):
         button = self.status_item.button()
-        bar_limits = [l for l in self._limits
-                      if l.kind in ("session", "weekly_all")] or self._limits[:2]
-        session = next((l for l in self._limits if l.kind == "session"), None)
+        bar_limits = [
+            limit for limit in self._limits
+            if limit.kind in ("session", "weekly_all")
+        ] or self._limits[:2]
+        primary = primary_limit(self._limits)
         if bar_limits:
             dark = "dark" in str(button.effectiveAppearance().name()).lower()
             button.setImage_(status_bar_image(bar_limits, dark))
-            button.setTitle_(" " + time_until(session.resets_at) if session else "")
+            button.setTitle_(" " + time_until(primary.resets_at) if primary else "")
         else:
             button.setImage_(None)
-            button.setTitle_("✳ …" if self._error is None else "✳ ?")
+            button.setTitle_("…" if not self._errors else "?")
         # Rebuilding replaces the menu's views, which cancels hover/tooltips
         # if the menu is open — skip it when nothing visible changed.
-        state = (tuple((l.label, round(l.percent), l.resets_at, l.severity)
-                       for l in self._limits),
-                 self._error, self._update)
+        state = (tuple((limit.provider, limit.label, round(limit.percent),
+                        limit.resets_at, limit.severity)
+                       for limit in self._limits),
+                 tuple(sorted(self._errors.items())), self._update)
         if state != getattr(self, "_menu_state", None):
             self._menu_state = state
             self._rebuild_menu()
@@ -444,24 +515,35 @@ class StatusApp(NSObject):
         header_item.setView_(header)
         self.menu.addItem_(header_item)
         self._animated_views.append(header)
-        if self._limits:
-            donut = DonutView.alloc().initWithLimits_(self._limits)
-            donut_item = NSMenuItem.alloc().init()
-            donut_item.setView_(donut)
-            self.menu.addItem_(donut_item)
-            self._animated_views.append(donut)
-            for limit in self._limits:
-                row_view = LimitRowView.alloc().initWithLimit_(limit)
-                row = NSMenuItem.alloc().init()
-                row.setView_(row_view)
-                self.menu.addItem_(row)
-                self._animated_views.append(row_view)
+        rendered_provider = False
+        for provider in PROVIDERS:
+            provider_limits = [
+                limit for limit in self._limits if limit.provider == provider
+            ]
+            if rendered_provider and (provider_limits or provider in self._errors):
+                self.menu.addItem_(NSMenuItem.separatorItem())
+            if provider_limits:
+                donut = DonutView.alloc().initWithProvider_limits_(
+                    provider, provider_limits)
+                donut_item = NSMenuItem.alloc().init()
+                donut_item.setView_(donut)
+                self.menu.addItem_(donut_item)
+                self._animated_views.append(donut)
+                for limit in provider_limits:
+                    row_view = LimitRowView.alloc().initWithLimit_(limit)
+                    row = NSMenuItem.alloc().init()
+                    row.setView_(row_view)
+                    self.menu.addItem_(row)
+                    self._animated_views.append(row_view)
+            if provider in self._errors:
+                err = NSMenuItem.alloc().init()
+                err.setView_(ErrorRowView.alloc().initWithMessage_(
+                    self._errors[provider]))
+                self.menu.addItem_(err)
+            rendered_provider = rendered_provider or bool(
+                provider_limits or provider in self._errors)
         for view in self._animated_views:
             view.set_spin(self._spin)
-        if self._error:
-            err = NSMenuItem.alloc().init()
-            err.setView_(ErrorRowView.alloc().initWithMessage_(self._error))
-            self.menu.addItem_(err)
         if self._update:
             self.menu.addItem_(NSMenuItem.separatorItem())
             self._add_action("Update available — v" + self._update, "openReleases:")
@@ -476,12 +558,16 @@ class StatusApp(NSObject):
         self.menu.addItem_(item)
 
     def refresh_(self, _sender):
-        self._skip_ticks = 0
+        self._skip_ticks = {provider: 0 for provider in PROVIDERS}
         self.tick_(None)
 
-    def openUsage_(self, _sender):
+    def openClaudeUsage_(self, _sender):
         self.menu.cancelTracking()
-        webbrowser.open(USAGE_URL)
+        webbrowser.open(CLAUDE_USAGE_PAGE)
+
+    def openCodexUsage_(self, _sender):
+        self.menu.cancelTracking()
+        webbrowser.open(CODEX_USAGE_PAGE)
 
     def donate_(self, _sender):
         self.menu.cancelTracking()

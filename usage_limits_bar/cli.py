@@ -6,30 +6,44 @@ from pathlib import Path
 
 from . import VERSION
 from .limits import (
-    CredentialsNotFound, TokenRejected, UsageRateLimited, get_limits, limit_line,
+    CLAUDE,
+    PROVIDER_NAMES,
+    PROVIDERS,
+    CredentialsNotFound,
+    TokenRejected,
+    UsageRateLimited,
+    get_limits,
+    limit_line,
 )
 
-LAUNCH_AGENT = Path.home() / "Library" / "LaunchAgents" / "com.claude-limits-bar.plist"
+LAUNCH_AGENT = Path.home() / "Library" / "LaunchAgents" / "com.usage-limits-bar.plist"
 
 
 def cmd_status() -> int:
-    try:
-        limits = get_limits()
-    except CredentialsNotFound:
-        print("No Claude Code credentials found — run `claude` and sign in first.")
-        return 1
-    except TokenRejected:
-        print("Stored token was rejected — use Claude Code once so it refreshes the token.")
-        return 1
-    except UsageRateLimited:
-        print("The usage API is rate-limited right now — try again in a minute.")
-        return 1
-    if not limits:
-        print("No limits reported for this account.")
-        return 0
-    for limit in limits:
-        print(limit_line(limit))
-    return 0
+    successes = 0
+    for provider in PROVIDERS:
+        try:
+            limits = get_limits(provider)
+        except CredentialsNotFound:
+            command = "claude" if provider == CLAUDE else "codex login"
+            print("No %s credentials found — run `%s` and sign in first." % (
+                PROVIDER_NAMES[provider], command))
+            continue
+        except TokenRejected:
+            command = "Claude Code" if provider == CLAUDE else "`codex login`"
+            print("%s token was rejected — sign in with %s again." % (
+                PROVIDER_NAMES[provider], command))
+            continue
+        except UsageRateLimited:
+            print("%s usage API is rate-limited — try again in a minute." %
+                  PROVIDER_NAMES[provider])
+            continue
+        successes += 1
+        if not limits:
+            print("No %s limits reported for this account." % PROVIDER_NAMES[provider])
+        for limit in limits:
+            print(limit_line(limit))
+    return 0 if successes else 1
 
 
 def cmd_autostart(state: str) -> int:
@@ -41,7 +55,7 @@ def cmd_autostart(state: str) -> int:
         return 0
     executable = Path(sys.argv[0]).resolve()
     plist = {
-        "Label": "com.claude-limits-bar",
+        "Label": "com.usage-limits-bar",
         "ProgramArguments": [str(executable)],
         "RunAtLoad": True,
     }
@@ -55,8 +69,8 @@ def cmd_autostart(state: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog="claude-limits-bar",
-        description="Claude limits and reset times in the macOS menu bar.",
+        prog="usage-limits-bar",
+        description="Claude and Codex limits and reset times in the macOS menu bar.",
     )
     parser.add_argument("--version", action="version", version=VERSION)
     sub = parser.add_subparsers(dest="command")

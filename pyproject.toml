@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-limits-bar"
-version = "1.4.1"
-description = "Claude Code limits and reset times in the macOS menu bar"
+name = "usage-limits-bar"
+version = "2.0.0"
+description = "Claude and Codex usage limits in the macOS menu bar"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Tilbert Balaban" }]
@@ -13,10 +13,10 @@ requires-python = ">=3.9"
 dependencies = ["pyobjc-framework-Cocoa>=9.0", "certifi"]
 
 [project.urls]
-Homepage = "https://github.com/TilbertBalaban/claude-limits-bar"
+Homepage = "https://github.com/TilbertBalaban/usage-limits-bar"
 
 [project.scripts]
-claude-limits-bar = "claude_limits_bar.cli:main"
+usage-limits-bar = "usage_limits_bar.cli:main"
 
 [tool.setuptools]
-packages = ["claude_limits_bar"]
+packages = ["usage_limits_bar"]
