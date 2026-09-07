@@ -70,6 +70,7 @@ MENU_WIDTH = 264
 RATE_LIMIT_ERROR = "Usage API rate-limited — showing last known data"
 RATE_LIMIT_NO_DATA_ERROR = "Usage API rate-limited — retrying in a minute"
 DONATE_URL = "https://base.monobank.ua/tilbertbalaban"
+README_URL = "https://github.com/TilbertBalaban/usage-limits-bar#readme"
 USAGE_PAGES = {
     CLAUDE: "https://claude.ai/settings/usage",
     CODEX: "https://chatgpt.com/codex/settings/usage",
@@ -205,7 +206,7 @@ def _symbol_button(symbol, fallback, tooltip, target, action):
 
 
 class HeaderView(NSView):
-    """Provider title with sponsor, usage, and refresh buttons.
+    """Provider title with sponsor, info, usage, and refresh buttons.
 
     Hovering a button shows its hint in place of the title. The hint clears
     on a short delay so moving between adjacent buttons swaps hints without
@@ -214,6 +215,7 @@ class HeaderView(NSView):
 
     BUTTONS = [
         ("dollarsign.circle", "$", "Support the developer", "donate:"),
+        ("info.circle", "i", "Open README", "openReadme:"),
         ("chart.bar.xaxis", "📊", "Open usage", "openUsage:"),
         ("arrow.clockwise", "↻", "Refresh", "refresh:"),
     ]
@@ -589,6 +591,12 @@ class StatusApp(NSObject):
         if provider is not None:
             self._menus[provider].cancelTracking()
         webbrowser.open(DONATE_URL)
+
+    def openReadme_(self, sender):
+        provider = TAG_PROVIDERS.get(sender.tag())
+        if provider is not None:
+            self._menus[provider].cancelTracking()
+        webbrowser.open(README_URL)
 
     def openReleases_(self, _sender):
         webbrowser.open(RELEASES_URL)

@@ -13,14 +13,14 @@ Each signed-in provider gets its own menu-bar item with compact ring gauges and 
 
 | Signed-in providers | Menu bar | Dropdown |
 |---|---|---|
-| Claude only | One Claude item: green session ring, purple weekly ring, reset countdown | Claude session donut, weekly outer arc, Claude limits, sponsor / usage / refresh |
-| Codex only | One Codex item: blue session ring, teal weekly ring, reset countdown | Codex session donut, weekly outer arc, Codex limits, sponsor / usage / refresh |
+| Claude only | One Claude item: green session ring, purple weekly ring, reset countdown | Claude session donut, weekly outer arc, Claude limits, sponsor / info / usage / refresh |
+| Codex only | One Codex item: blue session ring, teal weekly ring, reset countdown | Codex session donut, weekly outer arc, Codex limits, sponsor / info / usage / refresh |
 | Claude and Codex | Two independent items, one in each provider’s colors | Each item opens only its own provider’s limits and controls |
 
 Click an item for the full picture. Every provider dropdown uses the same native layout: a large session donut, a thin weekly outer arc, and one row per reported limit with its reset time. Claude errors stay in Claude’s item; Codex errors stay in Codex’s item.
 
 - Data for Claude and Codex refreshes independently every minute, so one unavailable provider does not hide the other.
-- Every provider dropdown has three header buttons: sponsor, provider usage, and refresh. The gauges spin while fetching.
+- Every provider dropdown has four header buttons: sponsor, README, provider usage, and refresh. The gauges spin while fetching.
 - The last successful response for each provider is cached in `~/Library/Caches/usage-limits-bar/` and shown immediately after a restart.
 - The app checks once a day for a newer version and adds an **Update available** menu item when one exists.
 
