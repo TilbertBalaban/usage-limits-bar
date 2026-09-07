@@ -11,11 +11,13 @@ See how close each signed-in account is to its session and weekly limits, and wh
 
 Each signed-in provider gets its own menu-bar item with compact ring gauges and a countdown to its active limit reset. Claude uses green and purple rings; Codex uses blue and teal. A provider that is not signed in is not shown. Warning states stay consistent across providers: orange at 80% and red with `!` at 100%.
 
-<img src="docs/menubar.png" width="256" alt="Menu bar ring gauges with percentages and a reset countdown">
+| Signed-in providers | Menu bar | Dropdown |
+|---|---|---|
+| Claude only | One Claude item: green session ring, purple weekly ring, reset countdown | Claude session donut, weekly outer arc, Claude limits, sponsor / usage / refresh |
+| Codex only | One Codex item: blue session ring, teal weekly ring, reset countdown | Codex session donut, weekly outer arc, Codex limits, sponsor / usage / refresh |
+| Claude and Codex | Two independent items, one in each provider’s colors | Each item opens only its own provider’s limits and controls |
 
-Click the gauges for the full picture. Each signed-in provider gets the same native layout: a large session donut, a thin weekly outer arc, and one row per reported limit with its reset time.
-
-<img src="docs/dropdown.png" width="264" alt="Dropdown with usage donut and limit reset rows">
+Click an item for the full picture. Every provider dropdown uses the same native layout: a large session donut, a thin weekly outer arc, and one row per reported limit with its reset time. Claude errors stay in Claude’s item; Codex errors stay in Codex’s item.
 
 - Data for Claude and Codex refreshes independently every minute, so one unavailable provider does not hide the other.
 - Every provider dropdown has three header buttons: sponsor, provider usage, and refresh. The gauges spin while fetching.
