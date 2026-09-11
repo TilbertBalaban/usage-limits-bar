@@ -7,10 +7,12 @@ import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 
 import objc
+import qrcode
 from AppKit import (
     NSApplication,
     NSApplicationActivationPolicyAccessory,
     NSAttributedString,
+    NSBackingStoreBuffered,
     NSBezierPath,
     NSButton,
     NSColor,
@@ -33,6 +35,9 @@ from AppKit import (
     NSTrackingMouseEnteredAndExited,
     NSVariableStatusItemLength,
     NSView,
+    NSWindow,
+    NSWindowStyleMaskClosable,
+    NSWindowStyleMaskTitled,
 )
 from Foundation import (
     NSDefaultRunLoopMode,
@@ -60,13 +65,16 @@ from .limits import (
     save_cache,
     time_until,
 )
+from .pairing import MOBILE_DOWNLOAD_URL, pairing_payload
 from .update import CHECK_INTERVAL_SECONDS, RELEASES_URL, available_update
 
 REFRESH_SECONDS = 60
 SPIN_FPS = 30
 SPIN_STEP_DEGREES = 12
 SPIN_MIN_SECONDS = 0.6
-MENU_WIDTH = 264
+MENU_WIDTH = 300
+PAIRING_WIDTH = 780
+PAIRING_HEIGHT = 500
 RATE_LIMIT_ERROR = "Usage API rate-limited — showing last known data"
 RATE_LIMIT_NO_DATA_ERROR = "Usage API rate-limited — retrying in a minute"
 DONATE_URL = "https://base.monobank.ua/tilbertbalaban"
@@ -205,8 +213,82 @@ def _symbol_button(symbol, fallback, tooltip, target, action):
     return button
 
 
+class QRCodeView(NSView):
+    def initWithPayload_frame_(self, payload, frame):
+        self = objc.super(QRCodeView, self).initWithFrame_(frame)
+        if self is None:
+            return None
+        code = qrcode.QRCode(
+            version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=1,
+            border=0,
+        )
+        code.add_data(payload)
+        code.make(fit=True)
+        self._matrix = code.get_matrix()
+        return self
+
+    def drawRect_(self, rect):
+        bounds = self.bounds()
+        NSColor.whiteColor().setFill()
+        NSBezierPath.fillRect_(bounds)
+        count = len(self._matrix)
+        module = max(1, math.floor(min(
+            (bounds.size.width - 20) / count,
+            (bounds.size.height - 20) / count,
+        )))
+        origin_x = (bounds.size.width - module * count) / 2
+        origin_y = (bounds.size.height - module * count) / 2
+        NSColor.blackColor().setFill()
+        for row, values in enumerate(self._matrix):
+            y = origin_y + (count - row - 1) * module
+            for column, enabled in enumerate(values):
+                if enabled:
+                    NSBezierPath.fillRect_(NSMakeRect(
+                        origin_x + column * module, y, module, module))
+
+
+class PairingView(NSView):
+    def initWithProvider_payload_(self, provider, payload):
+        self = objc.super(PairingView, self).initWithFrame_(
+            NSMakeRect(0, 0, PAIRING_WIDTH, PAIRING_HEIGHT))
+        if self is None:
+            return None
+        self._provider = provider
+        self.addSubview_(QRCodeView.alloc().initWithPayload_frame_(
+            payload, NSMakeRect(30, 110, 320, 320)))
+        self.addSubview_(QRCodeView.alloc().initWithPayload_frame_(
+            MOBILE_DOWNLOAD_URL, NSMakeRect(430, 110, 320, 320)))
+        return self
+
+    def drawRect_(self, rect):
+        provider_name = PROVIDER_NAMES[self._provider]
+        draw_text("Connect %s to your phone" % provider_name,
+                  NSMakeRect(24, 455, PAIRING_WIDTH - 48, 32),
+                  text_attrs(23, NSColor.labelColor(), bold=True))
+        draw_text("Open Usage Limits on your phone, then follow the two steps below.",
+                  NSMakeRect(24, 427, PAIRING_WIDTH - 48, 24),
+                  text_attrs(13, NSColor.secondaryLabelColor()))
+        draw_text("1  Pair %s" % provider_name,
+                  NSMakeRect(30, 78, 320, 24),
+                  text_attrs(15, NSColor.labelColor(), bold=True))
+        draw_text("Tap Scan desktop QR in the mobile app.",
+                  NSMakeRect(30, 54, 320, 20),
+                  text_attrs(12, NSColor.secondaryLabelColor()))
+        draw_text("2  Get the mobile app",
+                  NSMakeRect(430, 78, 320, 24),
+                  text_attrs(15, NSColor.labelColor(), bold=True))
+        draw_text("Download and setup instructions on GitHub.",
+                  NSMakeRect(430, 54, 320, 20),
+                  text_attrs(12, NSColor.secondaryLabelColor()))
+        draw_text("Pairing QR contains a sign-in credential — close this window after scanning.",
+                  NSMakeRect(24, 12, PAIRING_WIDTH - 48, 22),
+                  text_attrs(11, NSColor.systemOrangeColor()))
+
+
 class HeaderView(NSView):
-    """Provider title with sponsor, info, usage, and refresh buttons.
+    """Provider title with sponsor, info, mobile, usage, and refresh buttons.
 
     Hovering a button shows its hint in place of the title. The hint clears
     on a short delay so moving between adjacent buttons swaps hints without
@@ -216,6 +298,7 @@ class HeaderView(NSView):
     BUTTONS = [
         ("dollarsign.circle", "$", "Support the developer", "donate:"),
         ("info.circle", "i", "Open README", "openReadme:"),
+        ("iphone", "📱", "Connect mobile app", "openMobile:"),
         ("chart.bar.xaxis", "📊", "Open usage", "openUsage:"),
         ("arrow.clockwise", "↻", "Refresh", "refresh:"),
     ]
@@ -229,6 +312,7 @@ class HeaderView(NSView):
         self._provider = provider
         self._hint = None
         x = MENU_WIDTH - 30 * len(self.BUTTONS) - 10
+        self._title_width = x - 22
         for symbol, fallback, hint, action in self.BUTTONS:
             button = _symbol_button(symbol, fallback, hint, target, action)
             button.setTag_(PROVIDER_TAGS[provider])
@@ -271,12 +355,12 @@ class HeaderView(NSView):
 
     def drawRect_(self, rect):
         if self._hint:
-            draw_text(self._hint, NSMakeRect(16, 3, MENU_WIDTH - 110, 32),
+            draw_text(self._hint, NSMakeRect(16, 3, self._title_width, 32),
                       text_attrs(12, NSColor.secondaryLabelColor(),
                                  align=NSTextAlignmentLeft))
         else:
             draw_text(PROVIDER_NAMES[self._provider] + " Usage",
-                      NSMakeRect(16, 3, MENU_WIDTH - 110, 32),
+                      NSMakeRect(16, 3, self._title_width, 32),
                       text_attrs(14, NSColor.labelColor(), bold=True,
                                  align=NSTextAlignmentLeft))
 
@@ -397,6 +481,7 @@ class StatusApp(NSObject):
         self._status_items = {}
         self._menus = {}
         self._menu_states = {}
+        self._pairing_windows = {}
         self._render()
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             REFRESH_SECONDS, self, "tick:", None, True)
@@ -597,6 +682,30 @@ class StatusApp(NSObject):
         if provider is not None:
             self._menus[provider].cancelTracking()
         webbrowser.open(README_URL)
+
+    def openMobile_(self, sender):
+        provider = TAG_PROVIDERS.get(sender.tag())
+        if provider is None:
+            return
+        self._menus[provider].cancelTracking()
+        try:
+            payload = pairing_payload(provider, get_credentials(provider))
+        except CredentialsNotFound:
+            return
+        view = PairingView.alloc().initWithProvider_payload_(provider, payload)
+        window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            NSMakeRect(0, 0, PAIRING_WIDTH, PAIRING_HEIGHT),
+            NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
+            NSBackingStoreBuffered,
+            False,
+        )
+        window.setTitle_("Usage Limits Mobile")
+        window.setContentView_(view)
+        window.setReleasedWhenClosed_(False)
+        window.center()
+        window.makeKeyAndOrderFront_(None)
+        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        self._pairing_windows[provider] = window
 
     def openReleases_(self, _sender):
         webbrowser.open(RELEASES_URL)

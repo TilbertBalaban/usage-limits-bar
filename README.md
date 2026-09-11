@@ -20,7 +20,7 @@ Each signed-in provider gets its own menu-bar item with compact ring gauges and 
 Click an item for the full picture. Every provider dropdown uses the same native layout: a large session donut, a thin weekly outer arc, and one row per reported limit with its reset time. Claude errors stay in Claude’s item; Codex errors stay in Codex’s item.
 
 - Data for Claude and Codex refreshes independently every minute, so one unavailable provider does not hide the other.
-- Every provider dropdown has four header buttons: sponsor, README, provider usage, and refresh. The gauges spin while fetching.
+- Every provider dropdown has five header buttons: sponsor, README, mobile pairing, provider usage, and refresh. The gauges spin while fetching.
 - The last successful response for each provider is cached in `~/Library/Caches/usage-limits-bar/` and shown immediately after a restart.
 - The app checks once a day for a newer version and adds an **Update available** menu item when one exists.
 
@@ -62,6 +62,18 @@ Run `codex login` and choose ChatGPT sign-in. The app reads the OAuth session fr
 Codex limits are the usage included with the signed-in ChatGPT plan. API-key billing does not expose these ChatGPT plan windows.
 
 Credentials are sent only to their matching provider: Claude tokens to `api.anthropic.com`, and Codex tokens to `chatgpt.com`. Tokens are never logged or copied into the cache.
+
+## Mobile companion
+
+Install or run [Usage Limits Mobile](https://github.com/TilbertBalaban/usage-limits-mobile), then connect each desktop account without copying credentials by hand:
+
+1. Open a Claude or Codex menu-bar item and click the phone button.
+2. In the mobile app, choose **Scan desktop QR** and scan the left pairing code.
+3. Scan the right QR for the mobile download and setup page when needed.
+
+The pairing QR contains the selected provider's current access credential. Treat it like a password and close the pairing window after scanning. The credential is stored in the phone's secure keychain and requests then go directly from the phone to the provider.
+
+A standalone mobile build continues working over cellular or any Wi-Fi; the Mac is not needed after pairing. An Expo Go development session still depends on its development server.
 
 ## Support
 

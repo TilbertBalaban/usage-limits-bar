@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "usage-limits-bar"
-version = "2.0.1"
+version = "2.1.0"
 description = "Claude and Codex usage limits in the macOS menu bar"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Tilbert Balaban" }]
 requires-python = ">=3.9"
-dependencies = ["pyobjc-framework-Cocoa>=9.0", "certifi"]
+dependencies = ["pyobjc-framework-Cocoa>=9.0", "certifi", "qrcode>=7.4"]
 
 [project.urls]
 Homepage = "https://github.com/TilbertBalaban/usage-limits-bar"

@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.0 — 2026-09-11
+
+- Add a phone action to each provider menu for mobile setup
+- Show separate secure pairing and mobile download QR codes with setup guidance
+- Transfer only the selected provider's access credential in the pairing code
+
 ## v2.0.1 — 2026-09-07
 
 - Launch the menu bar app in the background so the terminal returns immediately
